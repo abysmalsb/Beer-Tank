@@ -9,7 +9,7 @@
 #define STEPPER_MOTOR_COIL_2_PIN 0
 #define STEPPER_MOTOR_COIL_1_PIN 1
 #define RIGHT_MOTOR_SPEED_PIN 2
-#define LEFT_HATCH_SERVO_PIN 3 
+#define LEFT_HATCH_SERVO_PIN 3
 #define RIGHT_HATCH_SERVO_PIN 4
 #define LEFT_MOTOR_SPEED_PIN 5
 #define RC_HORIZONTAL_PIN 6
@@ -26,7 +26,11 @@
 #define HATCH_OPENED_ANGLE 86
 #define CRANE_ELEVATED_VALUE 245
 #define CRANE_LOWERED_VALUE 115
-#define RC_ZERO_POINT 30
+#define MIN_SPEED 20
+#define RC_ZERO_TIME_FROM 1465
+#define RC_ZERO_TIME_TO 1525
+#define RC_MAX_TIME 2000
+#define RC_MIN_TIME 950
 
 /** Hardware settings **/
 #define BAT_VD_R1 22000 // BAT = Battery, VD = Voltage Divider
@@ -57,6 +61,8 @@ Servo rightHatch;
 int motorState = 8; // the motor is switched off
 int elevated = 1;
 
+boolean radioControlled = true;
+
 void calcHorizontal()
 {
   if (digitalRead(RC_HORIZONTAL_PIN) == HIGH)
@@ -70,7 +76,12 @@ void calcHorizontal()
       horizontal_pulse_time = ((volatile int)micros() - horizontal_timer_start);
       //restart the timer
       horizontal_timer_start = 0;
-      motorSpeedChange = (horizontal_pulse_time - 1500) / 3;
+      if (timeValid(horizontal_pulse_time)) {
+        motorSpeedChange = (horizontal_pulse_time - 1500) / 3;
+      }
+      else {
+        motorSpeedChange = 0;
+      }
     }
   }
 }
@@ -88,7 +99,12 @@ void calcVertical()
       vertical_pulse_time = ((volatile int)micros() - vertical_timer_start);
       //restart the timer
       vertical_timer_start = 0;
-      motorSpeedBase = (vertical_pulse_time - 1500) / 2;
+      if (timeValid(vertical_pulse_time)) {
+        motorSpeedBase = (vertical_pulse_time - 1500) / 2;
+      }
+      else {
+        motorSpeedBase = 0;
+      }
     }
   }
 }
@@ -104,20 +120,22 @@ void calcSwitch()
     if (state_switch_timer_start != 0)
     {
       state_switch_pulse_time = ((volatile int)micros() - state_switch_timer_start);
-      elevated = state_switch_pulse_time < 1500;
       //restart the timer
       state_switch_timer_start = 0;
+      elevated = state_switch_pulse_time < 1500;
     }
   }
 }
 
+boolean timeValid(int RCtime) {
+  return (RCtime > RC_MIN_TIME && RCtime < RC_ZERO_TIME_FROM) || (RCtime > RC_ZERO_TIME_TO && RCtime < RC_MAX_TIME);
+}
+
 void setup() {
   Serial.begin(115200);
-  
-  attachInterrupt(digitalPinToInterrupt(RC_HORIZONTAL_PIN), calcHorizontal, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(RC_VERTICAL_PIN), calcVertical, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(RC_STATE_SWITCH_PIN), calcSwitch, CHANGE);
-  
+
+  enableInterrupts();
+
   pinMode(CRANE_FEEDBACK_PIN, INPUT);
   pinMode(STEPPER_MOTOR_COIL_1_PIN, OUTPUT);
   pinMode(STEPPER_MOTOR_COIL_2_PIN, OUTPUT);
@@ -135,16 +153,47 @@ void setup() {
 }
 
 void loop() {
+
   if (Serial.available() > 0) {
-    elevated = Serial.parseInt();
+    char received = Serial.read();
+
+    if (received == 'r') {  //Radio controlled
+      radioControlled = true;
+      enableInterrupts();
+    }
+    else if (received == 's') { //Controlled through Serial
+      radioControlled = false;
+      disableInterrupts();
+    }
+    else if (received == 'e' && !radioControlled){  //elevate crane
+      elevated = HIGH;
+    }
+    else if (received == 'd' && !radioControlled){  //drop crane
+      elevated = LOW;
+    }
+    else if (received == 'm' && !radioControlled){  //setting the speed of the motors
+      long t = millis();
+      motorSpeedBase = Serial.parseInt();
+      motorSpeedChange = Serial.parseInt();
+    }
+    else if (received == 'b'){
+      Serial.println((int)(getBatteryVoltage() * 100));
+    }
   }
+
+  handleCrane();
+  refreshLeftMotor();
+  refreshRightMotor();
+}
+
+void handleCrane() {
   int craneValue = analogRead(CRANE_FEEDBACK_PIN);
 
   if (elevated) {
     if (craneValue < CRANE_ELEVATED_VALUE) {
       elevateCrane();
     }
-    else{
+    else {
       disableTheCoils();
     }
     openTheHatch();
@@ -158,9 +207,18 @@ void loop() {
       dropCrane();
     }
   }
+}
 
-  refreshLeftMotor();
-  refreshRightMotor();
+void enableInterrupts() {
+  attachInterrupt(digitalPinToInterrupt(RC_HORIZONTAL_PIN), calcHorizontal, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RC_VERTICAL_PIN), calcVertical, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RC_STATE_SWITCH_PIN), calcSwitch, CHANGE);
+}
+
+void disableInterrupts() {
+  detachInterrupt(RC_HORIZONTAL_PIN);
+  detachInterrupt(RC_VERTICAL_PIN);
+  detachInterrupt(RC_STATE_SWITCH_PIN);
 }
 
 void openTheHatch() {
@@ -239,9 +297,9 @@ float getBatteryVoltage() {
   return analogRead(BATTERY_PIN) * ADC_VALUE_TO_BAT_VOLTAGE_MULTIPLIER;
 }
 
-void refreshLeftMotor(){
+void refreshLeftMotor() {
   int leftMotorSpeed = motorSpeedBase - motorSpeedChange;
-  
+
   if (leftMotorSpeed > MAX_PWM_RESOLUTION) {
     leftMotorSpeed = MAX_PWM_RESOLUTION;
   }
@@ -249,13 +307,19 @@ void refreshLeftMotor(){
     leftMotorSpeed = -MAX_PWM_RESOLUTION;
   }
 
-  if (leftMotorSpeed > RC_ZERO_POINT) {
+  if (leftMotorSpeed > MIN_SPEED) {
     digitalWrite(LEFT_MOTOR_A_PIN, LOW);
     digitalWrite(LEFT_MOTOR_B_PIN, HIGH);
+    Serial.print(horizontal_pulse_time);
+    Serial.print(" ");
+    Serial.println(vertical_pulse_time);
   }
-  else if (leftMotorSpeed < -RC_ZERO_POINT) {
+  else if (leftMotorSpeed < -MIN_SPEED) {
     digitalWrite(LEFT_MOTOR_A_PIN, HIGH);
     digitalWrite(LEFT_MOTOR_B_PIN, LOW);
+    Serial.print(horizontal_pulse_time);
+    Serial.print(" ");
+    Serial.println(vertical_pulse_time);
   }
   else {
     digitalWrite(LEFT_MOTOR_A_PIN, LOW);
@@ -265,23 +329,29 @@ void refreshLeftMotor(){
   analogWrite(LEFT_MOTOR_SPEED_PIN, abs(leftMotorSpeed));
 }
 
-void refreshRightMotor(){
+void refreshRightMotor() {
   int rightMotorSpeed = motorSpeedBase + motorSpeedChange;
-  
+
   if (rightMotorSpeed > MAX_PWM_RESOLUTION) {
     rightMotorSpeed = MAX_PWM_RESOLUTION;
   }
   else if (rightMotorSpeed < -MAX_PWM_RESOLUTION) {
     rightMotorSpeed = -MAX_PWM_RESOLUTION;
   }
-  
-  if (rightMotorSpeed > RC_ZERO_POINT) {
+
+  if (rightMotorSpeed > MIN_SPEED) {
     digitalWrite(RIGHT_MOTOR_A_PIN, LOW);
     digitalWrite(RIGHT_MOTOR_B_PIN, HIGH);
+    Serial.print(horizontal_pulse_time);
+    Serial.print(" ");
+    Serial.println(vertical_pulse_time);
   }
-  else if (rightMotorSpeed < -RC_ZERO_POINT) {
+  else if (rightMotorSpeed < -MIN_SPEED) {
     digitalWrite(RIGHT_MOTOR_A_PIN, HIGH);
     digitalWrite(RIGHT_MOTOR_B_PIN, LOW);
+    Serial.print(horizontal_pulse_time);
+    Serial.print(" ");
+    Serial.println(vertical_pulse_time);
   }
   else {
     digitalWrite(RIGHT_MOTOR_A_PIN, LOW);
