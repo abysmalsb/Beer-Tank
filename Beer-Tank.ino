@@ -62,6 +62,7 @@ int motorState = 8; // the motor is switched off
 int elevated = 1;
 
 boolean radioControlled = true;
+boolean test = true;
 
 void calcHorizontal()
 {
@@ -122,7 +123,12 @@ void calcSwitch()
       state_switch_pulse_time = ((volatile int)micros() - state_switch_timer_start);
       //restart the timer
       state_switch_timer_start = 0;
-      elevated = state_switch_pulse_time < 1500;
+      if (radioControlled) {
+        elevated = state_switch_pulse_time < 1500;
+      }
+      else {
+        test = state_switch_pulse_time < 1500;
+      }
     }
   }
 }
@@ -162,28 +168,37 @@ void loop() {
       enableInterrupts();
     }
     else if (received == 's') { //Controlled through Serial
+      Serial.println("OK");
       radioControlled = false;
       disableInterrupts();
     }
-    else if (received == 'e' && !radioControlled){  //elevate crane
+    else if (received == 'e' && !radioControlled) { //elevate crane
       elevated = HIGH;
     }
-    else if (received == 'd' && !radioControlled){  //drop crane
+    else if (received == 'd' && !radioControlled) { //drop crane
       elevated = LOW;
     }
-    else if (received == 'm' && !radioControlled){  //setting the speed of the motors
+    else if (received == 'm' && !radioControlled) { //setting the speed of the motors
       long t = millis();
       motorSpeedBase = Serial.parseInt();
       motorSpeedChange = Serial.parseInt();
     }
-    else if (received == 'b'){
+    else if (received == 'b') {
       Serial.println((int)(getBatteryVoltage() * 100));
     }
   }
 
-  handleCrane();
-  refreshLeftMotor();
-  refreshRightMotor();
+  if (test) {
+    handleCrane();
+    refreshLeftMotor();
+    refreshRightMotor();
+  }
+  else{
+    motorSpeedChange = 0;
+    motorSpeedBase = 0;
+    refreshLeftMotor();
+    refreshRightMotor();
+  }
 }
 
 void handleCrane() {
@@ -218,7 +233,7 @@ void enableInterrupts() {
 void disableInterrupts() {
   detachInterrupt(RC_HORIZONTAL_PIN);
   detachInterrupt(RC_VERTICAL_PIN);
-  detachInterrupt(RC_STATE_SWITCH_PIN);
+  //detachInterrupt(RC_STATE_SWITCH_PIN);
 }
 
 void openTheHatch() {
@@ -310,16 +325,10 @@ void refreshLeftMotor() {
   if (leftMotorSpeed > MIN_SPEED) {
     digitalWrite(LEFT_MOTOR_A_PIN, LOW);
     digitalWrite(LEFT_MOTOR_B_PIN, HIGH);
-    Serial.print(horizontal_pulse_time);
-    Serial.print(" ");
-    Serial.println(vertical_pulse_time);
   }
   else if (leftMotorSpeed < -MIN_SPEED) {
     digitalWrite(LEFT_MOTOR_A_PIN, HIGH);
     digitalWrite(LEFT_MOTOR_B_PIN, LOW);
-    Serial.print(horizontal_pulse_time);
-    Serial.print(" ");
-    Serial.println(vertical_pulse_time);
   }
   else {
     digitalWrite(LEFT_MOTOR_A_PIN, LOW);
@@ -342,16 +351,10 @@ void refreshRightMotor() {
   if (rightMotorSpeed > MIN_SPEED) {
     digitalWrite(RIGHT_MOTOR_A_PIN, LOW);
     digitalWrite(RIGHT_MOTOR_B_PIN, HIGH);
-    Serial.print(horizontal_pulse_time);
-    Serial.print(" ");
-    Serial.println(vertical_pulse_time);
   }
   else if (rightMotorSpeed < -MIN_SPEED) {
     digitalWrite(RIGHT_MOTOR_A_PIN, HIGH);
     digitalWrite(RIGHT_MOTOR_B_PIN, LOW);
-    Serial.print(horizontal_pulse_time);
-    Serial.print(" ");
-    Serial.println(vertical_pulse_time);
   }
   else {
     digitalWrite(RIGHT_MOTOR_A_PIN, LOW);
