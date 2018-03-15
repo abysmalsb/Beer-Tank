@@ -4,6 +4,7 @@
 #define LED_PIN A0
 #define BATTERY_PIN A1
 #define CRANE_FEEDBACK_PIN A2
+#define LED_DOOR_PIN A3
 #define RIGHT_MOTOR_B_PIN A5
 #define RIGHT_MOTOR_A_PIN A6
 #define STEPPER_MOTOR_COIL_2_PIN 0
@@ -26,6 +27,8 @@
 #define HATCH_OPENED_ANGLE 86
 #define CRANE_ELEVATED_VALUE 245
 #define CRANE_LOWERED_VALUE 115
+#define LED_DOOR_CLOSED 45
+#define LED_DOOR_OPEN 85
 #define MIN_SPEED 20
 #define RC_ZERO_TIME_FROM 1465
 #define RC_ZERO_TIME_TO 1525
@@ -57,12 +60,14 @@ volatile int motorSpeedChange = 0;
 
 Servo leftHatch;
 Servo rightHatch;
+Servo ledDoor;
 
 int motorState = 8; // the motor is switched off
 int elevated = 1;
 
 boolean radioControlled = true;
 boolean test = true;
+boolean lightingEnabled = false;
 
 void calcHorizontal()
 {
@@ -124,6 +129,10 @@ void calcSwitch()
       //restart the timer
       state_switch_timer_start = 0;
       if (radioControlled) {
+        if (!elevated && state_switch_pulse_time < 1500) {
+          lightingEnabled = !lightingEnabled;
+          enableLighting(lightingEnabled);
+        }
         elevated = state_switch_pulse_time < 1500;
       }
       else {
@@ -143,6 +152,7 @@ void setup() {
   enableInterrupts();
 
   pinMode(CRANE_FEEDBACK_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT);
   pinMode(STEPPER_MOTOR_COIL_1_PIN, OUTPUT);
   pinMode(STEPPER_MOTOR_COIL_2_PIN, OUTPUT);
   pinMode(STEPPER_MOTOR_COIL_3_PIN, OUTPUT);
@@ -156,6 +166,8 @@ void setup() {
 
   leftHatch.attach(LEFT_HATCH_SERVO_PIN);
   rightHatch.attach(RIGHT_HATCH_SERVO_PIN);
+  ledDoor.attach(LED_DOOR_PIN);
+  enableLighting(false);
 }
 
 void loop() {
@@ -186,6 +198,12 @@ void loop() {
     else if (received == 'b') {
       Serial.println((int)(getBatteryVoltage() * 100));
     }
+    else if (received == 'l') { //turn on lighting
+      enableLighting(true);
+    }
+    else if (received == 'o') { //turn off lighting
+      enableLighting(false);
+    }
   }
 
   if (test) {
@@ -193,11 +211,22 @@ void loop() {
     refreshLeftMotor();
     refreshRightMotor();
   }
-  else{
+  else {
     motorSpeedChange = 0;
     motorSpeedBase = 0;
     refreshLeftMotor();
     refreshRightMotor();
+  }
+}
+
+void enableLighting(bool enable) {
+  if (enable) {
+    ledDoor.write(LED_DOOR_OPEN);
+    digitalWrite(LED_PIN, HIGH);
+  }
+  else {
+    ledDoor.write(LED_DOOR_CLOSED);
+    digitalWrite(LED_PIN, LOW);
   }
 }
 
