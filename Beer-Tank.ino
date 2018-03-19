@@ -1,3 +1,15 @@
+/**************************************************************
+   This code controls a Beer Tank using an
+   Arduino MKR1000 through serial or RC. More info:
+   https://www.hackster.io/Abysmal/beer-tank-20a2ed
+
+   This project is made for "3D Imaging with Walabot & Amazon Alexa"
+   contest on hackster.io. More info:
+   https://www.hackster.io/contests/walabot2017
+
+   author: Balázs Simon
+ **************************************************************/
+
 #include <Servo.h>
 
 /** Connection settings **/
@@ -66,9 +78,13 @@ int motorState = 8; // the motor is switched off
 int elevated = 1;
 
 boolean radioControlled = true;
-boolean test = true;
+boolean movingEnabled = true;
 boolean lightingEnabled = false;
 
+/**
+ * Interrupt handling function for the RC joystick's horizontal part
+ * In case of radio control, the PWM signal will be used to calculate the speed of the tank
+ */
 void calcHorizontal()
 {
   if (digitalRead(RC_HORIZONTAL_PIN) == HIGH)
@@ -92,6 +108,10 @@ void calcHorizontal()
   }
 }
 
+/**
+ * Interrupt handling function for the RC joystick's vertical part
+ * In case of radio control, the PWM signal will be used to steer the tank
+ */
 void calcVertical()
 {
   if (digitalRead(RC_VERTICAL_PIN) == HIGH)
@@ -115,6 +135,10 @@ void calcVertical()
   }
 }
 
+/**
+ * Interrupt handling function for the RC switch that will control the crane, the lighting and
+ * in case of autonomous control it is used to safely disable the tank if it starts to do crazy things
+ */
 void calcSwitch()
 {
   if (digitalRead(RC_STATE_SWITCH_PIN) == HIGH)
@@ -136,12 +160,15 @@ void calcSwitch()
         elevated = state_switch_pulse_time < 1500;
       }
       else {
-        test = state_switch_pulse_time < 1500;
+        movingEnabled = state_switch_pulse_time < 1500;
       }
     }
   }
 }
 
+/**
+ * validating pulse width times
+ */
 boolean timeValid(int RCtime) {
   return (RCtime > RC_MIN_TIME && RCtime < RC_ZERO_TIME_FROM) || (RCtime > RC_ZERO_TIME_TO && RCtime < RC_MAX_TIME);
 }
@@ -184,10 +211,10 @@ void loop() {
       radioControlled = false;
       disableInterrupts();
     }
-    else if (received == 'e' && !radioControlled) { //elevate crane
+    else if (received == 'e' && !radioControlled) { //elevate the crane
       elevated = HIGH;
     }
-    else if (received == 'd' && !radioControlled) { //drop crane
+    else if (received == 'd' && !radioControlled) { //drop the crane
       elevated = LOW;
     }
     else if (received == 'm' && !radioControlled) { //setting the speed of the motors
@@ -195,7 +222,7 @@ void loop() {
       motorSpeedBase = Serial.parseInt();
       motorSpeedChange = Serial.parseInt();
     }
-    else if (received == 'b') {
+    else if (received == 'b') { //checking the status of the battery
       Serial.println((int)(getBatteryVoltage() * 100));
     }
     else if (received == 'l') { //turn on lighting
@@ -206,7 +233,8 @@ void loop() {
     }
   }
 
-  if (test) {
+  //in case of autonomous operation moving can be disabled remotely
+  if (movingEnabled) {
     handleCrane();
     refreshLeftMotor();
     refreshRightMotor();
@@ -219,6 +247,9 @@ void loop() {
   }
 }
 
+/**
+ * Enable or disable front lighting
+ */
 void enableLighting(bool enable) {
   if (enable) {
     ledDoor.write(LED_DOOR_OPEN);
@@ -230,6 +261,9 @@ void enableLighting(bool enable) {
   }
 }
 
+/**
+ * Moving the crane and thus the beer to the desired state
+ */
 void handleCrane() {
   int craneValue = analogRead(CRANE_FEEDBACK_PIN);
 
@@ -253,28 +287,44 @@ void handleCrane() {
   }
 }
 
+/**
+ * Enabling interrupts
+ */
 void enableInterrupts() {
+  attachInterrupt(digitalPinToInterrupt(RC_STATE_SWITCH_PIN), calcSwitch, CHANGE);
   attachInterrupt(digitalPinToInterrupt(RC_HORIZONTAL_PIN), calcHorizontal, CHANGE);
   attachInterrupt(digitalPinToInterrupt(RC_VERTICAL_PIN), calcVertical, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(RC_STATE_SWITCH_PIN), calcSwitch, CHANGE);
 }
 
+/**
+ * Disabling interrupts. They don't need in case of autonomous operation.
+ * RC_STATE_SWITCH_PIN stayed enabled because in autonomous mode it is used as a safety switch
+ */
 void disableInterrupts() {
   detachInterrupt(RC_HORIZONTAL_PIN);
   detachInterrupt(RC_VERTICAL_PIN);
   //detachInterrupt(RC_STATE_SWITCH_PIN);
 }
 
+/**
+ * The hatch needs to be opened to elevate the crane
+ */
 void openTheHatch() {
   leftHatch.write(LEFT_SERVO_ZERO_ANGLE + HATCH_OPENED_ANGLE);
   rightHatch.write(RIGHT_SERVO_ZERO_ANGLE - HATCH_OPENED_ANGLE);
 }
 
+/**
+ * Closing the hatch after the crane is lowered
+ */
 void closeTheHatch() {
   leftHatch.write(LEFT_SERVO_ZERO_ANGLE);
   rightHatch.write(RIGHT_SERVO_ZERO_ANGLE);
 }
 
+/**
+ * Lowering the crane
+ */
 void dropCrane() {
   motorState++;
   if (motorState > 7) {
@@ -283,6 +333,9 @@ void dropCrane() {
   moveMotorToState(motorState);
 }
 
+/**
+ * Elevating the crane
+ */
 void elevateCrane() {
   motorState--;
   if (motorState < 0) {
@@ -291,12 +344,17 @@ void elevateCrane() {
   moveMotorToState(motorState);
 }
 
-//The coils of the motor will be turned off to avoid overheating and reduce power consumption
+/**
+ * The coils of the stepper motor will be turned off to avoid overheating and reduce power consumption
+ */
 void disableTheCoils() {
   motorState = 8;
   moveMotorToState(motorState);
 }
 
+/**
+ * Moving the stepper motor
+ */
 void moveMotorToState(int state) {
   switch (state) {
     case 0:
@@ -329,6 +387,9 @@ void moveMotorToState(int state) {
   }
 }
 
+/**
+ * switching on or off the coils of the stepper motor
+ */
 void motorStep(int coil1, int coil2, int coil3, int coil4) {
   digitalWrite(STEPPER_MOTOR_COIL_1_PIN, coil1);
   digitalWrite(STEPPER_MOTOR_COIL_2_PIN, coil2);
@@ -337,10 +398,17 @@ void motorStep(int coil1, int coil2, int coil3, int coil4) {
   delay(1);
 }
 
+/**
+ * returning the calculated voltage of the battery
+ */
 float getBatteryVoltage() {
   return analogRead(BATTERY_PIN) * ADC_VALUE_TO_BAT_VOLTAGE_MULTIPLIER;
 }
 
+/**
+ * update the speed of the left motor. It is calulcated from the
+ * base speed of the tank and the sterring parameter
+ */
 void refreshLeftMotor() {
   int leftMotorSpeed = motorSpeedBase - motorSpeedChange;
 
@@ -367,6 +435,10 @@ void refreshLeftMotor() {
   analogWrite(LEFT_MOTOR_SPEED_PIN, abs(leftMotorSpeed));
 }
 
+/**
+ * update the speed of the right motor. It is calulcated from the
+ * base speed of the tank and the sterring parameter
+ */
 void refreshRightMotor() {
   int rightMotorSpeed = motorSpeedBase + motorSpeedChange;
 
