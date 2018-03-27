@@ -31,7 +31,7 @@ ask = Ask(app, '/')
 
 logging.getLogger("flask_ask").setLevel(logging.DEBUG)
 
-MAX_MOVEMENT = 10;
+MAX_MOVEMENT = 25;
 OBJECT_DIRECTION_RANGE = 18
 OBJECT_DISTANCE_RANGE = 25
 OBJECT_DISTANCE = 80
@@ -155,10 +155,10 @@ class BeerTankApp:
 					required to make the tank move.
 				"""
 				if human.yPosCm > OBJECT_DIRECTION_RANGE:
-					motorSpeedChange = 75
+					motorSpeedChange = 85
 					motorSpeedBase = 0
 				elif human.yPosCm < -OBJECT_DIRECTION_RANGE:
-					motorSpeedChange = -75
+					motorSpeedChange = -85
 					motorSpeedBase = 0
 				elif human.zPosCm - OBJECT_DISTANCE > OBJECT_DISTANCE_RANGE:
 					motorSpeedChange = 0
