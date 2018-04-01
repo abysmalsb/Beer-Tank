@@ -1,0 +1,1 @@
+Copy the certificate.pem.crt and the private.pem.key files to this folder.
